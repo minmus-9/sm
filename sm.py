@@ -177,6 +177,7 @@ class _SMBase(base_with_mcs(_SMMetaclass)):
         )
 
     def status(self):
+        ## pylint: disable=no-self-use
         return None
 
     def running(self):
@@ -332,7 +333,7 @@ class SM(_SMBase):
                 while q:
                     self._feed(q.popleft())
                     self._bufcnt =- 1
-            except (KeyboardInterrupt, SystemExit, error, BaseException):
+            except (KeyboardInterrupt, SystemExit, error):
                 raise
             except BaseException as exc:    ## pylint: disable=broad-except
                 self._error("feed exception: " + str(exc))
@@ -411,7 +412,6 @@ class SM(_SMBase):
 
     def stop(self):
         self._stop()
-        ## XXX
 
     def symbol(self):
         self._check_run()
