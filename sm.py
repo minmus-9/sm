@@ -176,6 +176,9 @@ class _SMBase(base_with_mcs(_SMMetaclass)):
             start_state, symbol, function, end_state
         )
 
+    def status(self):
+        return None
+
     def running(self):
         rs = self._runstate
         if rs == self._RUN_STATE_DONE:
