@@ -1,3 +1,5 @@
+## {{{ docstring
+
 """
 sm.py - state machine library
 
@@ -12,6 +14,7 @@ tested with:
     - python 3.8.5
 """
 
+## }}}
 ## {{{ prologue
 from __future__ import print_function as _
 
@@ -26,8 +29,9 @@ __all__ = [
     "AllSymbols",
     "EofSymbol",
     "SM",
-    "programming_error",
     "error",
+    "programming_error",
+    "sm_error",
 ]
 
 OLD_PY = sys.version_info[0] < 3
@@ -47,11 +51,15 @@ class EofSymbol(object):
     ## pylint: disable=too-few-public-methods
     pass
 
-class error(SyntaxError):
+class sm_error(SyntaxError):
     ## pylint: disable=too-few-public-methods
     pass
 
-class programming_error(RuntimeError):
+class error(sm_error, SyntaxError):
+    ## pylint: disable=too-few-public-methods
+    pass
+
+class programming_error(sm_error, RuntimeError):
     ## pylint: disable=too-few-public-methods
     pass
 
@@ -299,17 +307,13 @@ class SM(_SMBase):
         self._symbol  = None
         self._next    = None
 
-        self._check_run    = self._check_run
-        self._check_state  = self._check_state
-        self._check_symbol = self._check_symbol
-
     def current(self):
-        if self._runstate == self._RUN_STATE_INIT:
-            self._error("sm has not started")
         return self._stack[-1]
 
+    def default(self):  ## pylint: disable=no-self-use
+        raise error("no transition defined for current symbol")
+
     def depth(self):
-        self._check_run()
         return len(self._stack)
 
     def feed(self, symbol=_Absent):
@@ -332,15 +336,16 @@ class SM(_SMBase):
             try:
                 while q:
                     self._feed(q.popleft())
-                    self._bufcnt =- 1
+                self._bufcnt = 0
             except (KeyboardInterrupt, SystemExit, error):
                 raise
             except BaseException as exc:    ## pylint: disable=broad-except
                 self._error("feed exception: " + str(exc))
-            if not q:
-                self._bufcnt = 0
         finally:
             self._feeding = False
+
+    def feed_seq(self, seq):
+        self.feed([sym for sym in seq])
 
     def last(self):
         self._check_run()
@@ -379,7 +384,7 @@ class SM(_SMBase):
         self._check_run()
         if symbol is _Absent:
             symbol = self.symbol()
-        if not self._check_symbol(symbol):
+        elif not self._check_symbol(symbol):
             self._error("bad putback symbol")
         q = self._buffer
         if len(q) == self.MAX_BUFFER_SYMBOLS:
@@ -390,18 +395,16 @@ class SM(_SMBase):
         q.append(symbol)
 
     def putbacks(self):
-        self._check_run()
         return tuple(self._buffer)
 
     def reset(self):
         self._check_run()
         self._stack   = [self._state0]
-        self._buffer  = [ ]
+        self._buffer  = collections.deque()
         self._bufcnt  = 0
         self._last    = None
 
     def set_state(self, state):
-        self._check_run()
         if not self._check_state(state):
             self._error("bad state")
         if state in self._stops:
@@ -453,9 +456,9 @@ class SM(_SMBase):
 
     def _check_state(self, state):
         ## pylint: disable=method-hidden
-        ok = self._ok_states
         if state in self._NOK_STATES:
             return False
+        ok = self._ok_states
         if ok:
             try:
                 return state in ok
@@ -478,11 +481,15 @@ class SM(_SMBase):
         stk  = self._stack
         old  = stk[-1]
         tbl  = self._xtable[old]
-        info = tbl.get(symbol, None)
-        if info is None:
+        while True:
+            info = tbl.get(symbol, None)
+            if info is not None:
+                break
             info = tbl.get(AllSymbols, None)
-            if info is None:
-                raise error("no transition defined for symbol")
+            if info is not None:
+                break
+            info = self.default.__func__, _Absent
+            break
         function, end_state = info
         self._next = None
         self._symbol = symbol

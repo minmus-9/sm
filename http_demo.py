@@ -13,22 +13,8 @@ from sm import (
 )
 
 __all__ = [
-    "HttpRequest",
-    "HttpResponse",
     "HttpRequestParser", "http_request_parser",
 ]
-
-PY3 = sys.version_info[0] > 2
-
-if PY3:
-    ## pylint: disable=no-name-in-module,import-error
-    from urllib.parse import parse_qsl, unquote, unquote_plus, urlparse
-    from http.client  import responses as httpresponses
-else:
-    ## pylint: disable=no-name-in-module,import-error
-    from urllib   import unquote, unquote_plus  ## pylint: disable=ungrouped-imports
-    from urlparse import parse_qsl, urlparse
-    from httplib  import responses as httpresponses
 
 ## }}}
 ## {{{ HttpRequestParser class
@@ -108,7 +94,7 @@ class HttpRequestParser(SM):
         self.pop()
 
     @transition(STATE_CR, AllSymbols)
-    def _cr_error(self, sym):
+    def _cr_error(self):
         raise ValueError("STATE_CR bad sym " + repr(self.symbol()))
 
     ALL_WS = [c for c in "\t\n\r "]
