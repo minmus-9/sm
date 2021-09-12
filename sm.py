@@ -1,5 +1,3 @@
-## {{{ docstring
-
 """
 sm.py - state machine library
 
@@ -12,13 +10,14 @@ tested with:
     - python 3.6.12
     - python 3.7.3
     - python 3.8.5
+    - python 3.9.5
 """
 
-## }}}
 ## {{{ prologue
 from __future__ import print_function as _
 
 ## pylint: disable=invalid-name,bad-whitespace
+## pylint: disable=useless-object-inheritance,super-with-arguments
 ## XXX pylint: disable=missing-docstring
 
 import collections
@@ -34,14 +33,10 @@ __all__ = [
     "sm_error",
 ]
 
-OLD_PY = sys.version_info[0] < 3
-
 ## }}}
 ## {{{ support classes and functions
 
-class _Absent(object):
-    ## pylint: disable=too-few-public-methods
-    pass
+_Absent = object()
 
 class AllSymbols(object):
     ## pylint: disable=too-few-public-methods
@@ -51,7 +46,11 @@ class EofSymbol(object):
     ## pylint: disable=too-few-public-methods
     pass
 
-class sm_error(SyntaxError):
+class _Stop(Exception):
+    ## pylint: disable=too-few-public-methods
+    pass
+
+class sm_error(Exception):
     ## pylint: disable=too-few-public-methods
     pass
 
@@ -66,7 +65,7 @@ class programming_error(sm_error, RuntimeError):
 def base_with_mcs(mcs):
     meta_name  = mcs.__name__
     class_name = "class_%s" % meta_name
-    if OLD_PY:
+    if sys.version_info[0] < 3:
         template = "class %s(object):\n __metaclass__ = %s"
     else:
         template = "class %s(metaclass=%s):\n pass"
@@ -81,7 +80,7 @@ _DeferredStateInfo = collections.namedtuple(
     "start_state symbol function end_state"
 )
 
-_DeferredStateFunctionAttr = "___deferred_sm_state_info___"
+_DeferredStateFunctionAttr = "_deferred_sm_state_info___"
 
 ## }}}
 ## {{{ transition() method decorator
@@ -109,9 +108,9 @@ def transition(
 class _SMMetaclass(type):
     _class_transition_map = weakref.WeakKeyDictionary()
 
-    def __new__(mcs, name, bases, attrs):
-        cls  = type.__new__(mcs, name, bases, attrs)
-        xits = mcs._class_transition_map.setdefault(cls, { })
+    def __new__(cls, name, bases, attrs):
+        kls  = type.__new__(cls, name, bases, attrs)
+        xits = cls._class_transition_map.setdefault(kls, { })
         for a, v in attrs.items():
             if not callable(v):
                 continue
@@ -120,7 +119,7 @@ class _SMMetaclass(type):
                 continue
             delattr(v, _DeferredStateFunctionAttr)
             xits[a] = deferred
-        return cls
+        return kls
 
     def __call__(cls, *args, **kw):
         obj = type.__call__(cls, *args, **kw)
@@ -290,6 +289,9 @@ class SM(_SMBase):
                 self.START_STATE if start_state is _Absent else start_state,
                 stop_states or self.STOP_STATES
             )
+
+        self._ok_states = { }
+        self._ok_alpha  = { }
         self._check_args(states, alphabet)
 
         self._state0  = start_state
@@ -303,16 +305,24 @@ class SM(_SMBase):
         self._symbol  = None
         self._next    = None
 
+        self._check_run    = self._check_run
+        self._check_state  = self._check_state
+        self._check_symbol = self._check_symbol
+
     def current(self):
+        if self._runstate == self._RUN_STATE_INIT:
+            self._error("sm has not started")
         return self._stack[-1]
 
     def default(self):  ## pylint: disable=no-self-use
         raise error("no transition defined for current symbol")
 
     def depth(self):
+        self._check_run()
         return len(self._stack)
 
     def feed(self, symbol=_Absent):
+        ## pylint: disable=too-many-branches
         self._check_run()
         if isinstance(symbol, list):
             for s in symbol:
@@ -333,16 +343,19 @@ class SM(_SMBase):
                 while q:
                     self._feed(q.popleft())
                 self._bufcnt = 0
-            except (KeyboardInterrupt, SystemExit, error):
+            except (KeyboardInterrupt, SystemExit, sm_error):
                 self._bufcnt = 0
                 del q[:]
                 raise
+            except _Stop:
+                pass
             except BaseException as exc:    ## pylint: disable=broad-except
                 self._error("feed exception: " + str(exc))
         finally:
             self._feeding = False
 
     def feed_seq(self, seq):
+        ## pylint: disable=unnecessary-comprehension
         self.feed([sym for sym in seq])
 
     def last(self):
@@ -393,6 +406,7 @@ class SM(_SMBase):
         q.append(symbol)
 
     def putbacks(self):
+        self._check_run()
         return tuple(self._buffer)
 
     def reset(self):
@@ -403,6 +417,7 @@ class SM(_SMBase):
         self._last    = None
 
     def set_state(self, state):
+        self._check_run()
         if not self._check_state(state):
             self._error("bad state")
         if state in self._stops:
@@ -413,6 +428,8 @@ class SM(_SMBase):
 
     def stop(self):
         self._stop()
+        if self._feeding:
+            raise _Stop()
 
     def symbol(self):
         self._check_run()
@@ -432,7 +449,7 @@ class SM(_SMBase):
         tbl[symbol] = (function, end_state)
 
     def _check_args(self, states, alphabet):
-        ok  = self._ok_states = { }
+        ok  = self._ok_states
         nok = self._NOK_STATES
         for s in states:
             if s in nok:
@@ -442,10 +459,11 @@ class SM(_SMBase):
             except TypeError:
                 self._error("unhashable state")
         try:
+            ## pylint: disable=unnecessary-comprehension
             alphabet = [s for s in alphabet]
         except ValueError:
             self._error("alphabet must be a sequence")
-        ok = self._ok_alpha = { }
+        ok = self._ok_alpha
         for s in alphabet:
             try:
                 ok[s] = True
@@ -461,8 +479,7 @@ class SM(_SMBase):
             try:
                 return state in ok
             except TypeError:
-                return False
-            return True
+                return False    ## not hashable
         return True
 
     def _check_symbol(self, symbol):
@@ -486,19 +503,21 @@ class SM(_SMBase):
             info = tbl.get(AllSymbols, None)
             if info is not None:
                 break
-            info = self.default.__func__, _Absent
+            func = getattr(self.default, "__func__", None)
+            if func is None:
+                raise error("no transition defined for symbol")
+            info = func, _Absent
             break
         function, end_state = info
         self._next = None
         self._symbol = symbol
         ret = function(self)
         new = self._next if ret is None else ret
-        new = end_state  if ret is None else ret
+        new = end_state  if new is None else new
         if new is _Absent:
             new = None
-        else:
-            if not self._check_state(new):
-                self._error("bad next state")
+        elif not self._check_state(new):
+            self._error("bad next state")
         if new is not None:
             stk[-1] = new
             self._last = old
@@ -508,26 +527,27 @@ class SM(_SMBase):
 
     def _process_states(self, states, start_state, stop_states):
         try:
-            states = [s for s in states]
+            ## pylint: disable=unnecessary-comprehension
+            st = [s for s in states]
         except ValueError:
-            self._error("states must be a sequence")
-        if len(set(states)) != len(states):
+            self._error("states must be iterable")
+        states = set(st)
+        if len(states) != len(st):
             self._error("dup states")
         if start_state is _Absent:
             if not states:
                 self._error("no start state provided")
-            start_state = states[0]
+            start_state = st[0]
         elif start_state not in states:
-            states = [start_state] + states
+            states.add(start_state)
         if stop_states is _Absent:
             stop_states = [ ]
         elif isinstance(stop_states, (list, tuple)):
             for s in stop_states:
-                if s not in states:
-                    states.append(s)
+                states.add(s)
         else:
             if stop_states not in states:
-                states.append(stop_states)
+                states.add(stop_states)
             stop_states = [stop_states]
         return states, start_state, stop_states
 
@@ -542,7 +562,8 @@ def test():
         STATE_WAIT_B = 1
         STATE_DONE   = 2
 
-        STATES      = (STATE_WAIT_A, STATE_WAIT_B)
+        START_STATE = STATE_WAIT_A
+        STATES      = (STATE_WAIT_A, STATE_WAIT_B, STATE_DONE)
         STOP_STATES = (STATE_DONE,)
 
         @transition(STATE_WAIT_A, "a", STATE_WAIT_B)
@@ -551,7 +572,8 @@ def test():
 
         @transition(STATE_WAIT_A, "c")
         def stop_a(self):
-            return self.STATE_DONE
+            self.next(self.STATE_DONE)
+            ## or: return self.STATE_DONE
 
         @transition(STATE_WAIT_A, EofSymbol, STATE_DONE)
         def eof_a(self):
@@ -573,7 +595,6 @@ def test():
 
         @transition(STATE_WAIT_B, AllSymbols)
         def other_b(self):
-            print("b", self.symbol())
             raise error("expected 'a' or 'b'")
 
     sm = MySM()
@@ -592,6 +613,12 @@ def test():
     sm.feed("c")
     assert sm.current() == sm.STATE_DONE
     #sm.feed("a")   ## err: sm done
+
+    class SM2(SM):
+        pass
+
+    SM2((), "abc", start_state="u", stop_states="v")
+    SM2(("u",), "abc", stop_states="v")
 
     print("pass")
 

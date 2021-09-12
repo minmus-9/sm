@@ -6,8 +6,6 @@ from __future__ import print_function as _
 
 ## pylint: disable=invalid-name,bad-whitespace
 
-import sys
-
 from sm import (
     AllSymbols, EofSymbol, SM, transition
 )
@@ -51,8 +49,8 @@ class HttpRequestParser(SM):
         STATE_DONE,
     )
 
-    def __init__(self, lock):
-        super(HttpRequestParser, self).__init__(lock)
+    def __init__(self):
+        super(HttpRequestParser, self).__init__()
         self.method  = ""
         self.uri     = ""
         self.version = ""
@@ -94,12 +92,12 @@ class HttpRequestParser(SM):
         self.pop()
 
     @transition(STATE_CR, AllSymbols)
-    def _cr_error(self):
+    def _cr_error(self, sym):
         raise ValueError("STATE_CR bad sym " + repr(self.symbol()))
 
-    ALL_WS = [c for c in "\t\n\r "]
-    WS     = [c for c in "\t "]
-    EOL    = [c for c in "\n\r"]
+    ALL_WS = list("\t\n\r ")
+    WS     = list("\t ")
+    EOL    = list("\n\r")
 
     ########################################
     ## start of requst line
@@ -221,9 +219,9 @@ class HttpRequestParser(SM):
 ## }}}
 ## {{{ http_request_parser()
 
-def http_request_parser(lock):
+def http_request_parser():
     "request parser returns (feeder(), closer())"
-    p = HttpRequestParser(lock)
+    p = HttpRequestParser()
     p.start()
     return p.feed, p
 
@@ -233,8 +231,8 @@ def http_request_parser(lock):
 def test():
     "test code"
     ## pylint: disable=line-too-long
-    feeder, parser = http_request_parser(None)
-    feeder(symbol=[c for c in
+    feeder, parser = http_request_parser()
+    feeder(symbol=list(
     """
 GET /index.html;x=1&y=2?a=b%20c&d#frag HTTP/1.1
 Host: localhost:1234
@@ -249,7 +247,7 @@ Sec-Fetch-Dest: document
 Accept-Encoding: gzip, deflate, br
 Accept-Language: en-US,en;q=0.9
 
-""".lstrip()])
+""".lstrip()))
     feeder(EofSymbol)
     d = { }
     for k in dir(parser):
@@ -257,6 +255,7 @@ Accept-Language: en-US,en;q=0.9
         if k.startswith("_") or callable(v) or k.lower() != k:
             continue
         d[k] = v
+    ## pylint: disable=import-outside-toplevel
     from pprint import pprint
     pprint(d)
 
